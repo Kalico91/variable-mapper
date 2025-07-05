@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Variable Mapper - Standardize Your Data</title>
+    <meta name="description" content="Upload Excel files and create standardization mappings for systematic reviews and data analysis">
+    
+    <!-- React and ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for JSX transformation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- XLSX library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <style>
+        /* Custom scrollbar styles */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        
+        // Lucide icon components
+        const Icon = ({ name, className = "h-4 w-4", ...props }) => {
+            useEffect(() => {
+                lucide.createIcons();
+            }, []);
+            
+            return <i data-lucide={name} className={className} {...props}></i>;
+        };
+
+        const FlexibleVariableMapper = () => {
+            const [file, setFile] = useState(null);
+            const [data, setData] = useState(null);
+            const [headers, setHeaders] = useState([]);
+            const [selectedColumn, setSelectedColumn] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [standardizationMap, setStandardizationMap] = useState({});
+            const [searchTerm, setSearchTerm] = useState('');
+            const [newMapping, setNewMapping] = useState({ standard: '', variants: '' });
+            const [showMapped, setShowMapped] = useState(true);
+            const [showUnmapped, setShowUnmapped] = useState(true);
+            const [selectedVariables, setSelectedVariables] = useState([]);
+            const [selectedVariable, setSelectedVariable] = useState(null);
+            const [showExportPreview, setShowExportPreview] = useState(false);
+            const [copiedCode, setCopiedCode] = useState({ r: false, python: false });
+            const [bulkMappingMode, setBulkMappingMode] = useState(false);
+            const [dragActive, setDragActive] = useState(false);
+
+            const handleDrag = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (e.type === 'dragenter' || e.type === 'dragover') {
+                    setDragActive(true);
+                } else if (e.type === 'dragleave') {
+                    setDragActive(false);
+                }
+            };
+
+            const handleDrop = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setDragActive(false);
+                
+                if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                    handleFile(e.dataTransfer.files[0]);
+                }
+            };
+
+            const handleFileInput = (e) => {
+                if (e.target.files && e.target.files[0]) {
+                    handleFile(e.target.files[0]);
+                }
+            };
+
+            const handleFile = async (file) => {
+                if (!file.name.match(/\.(xlsx|xls)$/)) {
+                    alert('Please upload an Excel file (.xlsx or .xls)');
+                    return;
+                }
+
+                setFile(file);
+                setLoading(true);
+                
+                try {
+                    const reader = new FileReader();
+                    reader.onload = async (e) => {
+                        const data = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        
+                        const firstSheetName = workbook.SheetNames[0];
+                        const worksheet = workbook.Sheets[firstSheetName];
+                        
+                        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+                        
+                        if (jsonData.length > 0) {
+                            setHeaders(jsonData[0]);
+                            setData(jsonData.slice(1));
+                        }
+                        
+                        setLoading(false);
+                    };
+                    
+                    reader.readAsArrayBuffer(file);
+                } catch (error) {
+                    console.error('Error reading file:', error);
+                    alert('Error reading file. Please try again.');
+                    setLoading(false);
+                }
+            };
+
+            const resetAll = () => {
+                setFile(null);
+                setData(null);
+                setHeaders([]);
+                setSelectedColumn('');
+                setStandardizationMap({});
+                setSelectedVariables([]);
+                setSelectedVariable(null);
+                setSearchTerm('');
+                setBulkMappingMode(false);
+            };
+
+            const getUniqueValues = (columnIndex) => {
+                if (!data || columnIndex === '') return [];
+                
+                const values = data
+                    .map(row => row[columnIndex])
+                    .filter(v => v && v !== '' && typeof v === 'string');
+                
+                return [...new Set(values)];
+            };
+
+            const findStandardMapping = (value) => {
+                for (const [standard, variants] of Object.entries(standardizationMap)) {
+                    if (variants.some(variant => 
+                        value.toLowerCase().includes(variant.toLowerCase()) ||
+                        variant.toLowerCase().includes(value.toLowerCase())
+                    )) {
+                        return standard;
+                    }
+                }
+                return null;
+            };
+
+            const toggleVariableSelection = (variable) => {
+                setSelectedVariables(prev => {
+                    if (prev.includes(variable)) {
+                        return prev.filter(v => v !== variable);
+                    } else {
+                        return [...prev, variable];
+                    }
+                });
+            };
+
+            const clearSelection = () => {
+                setSelectedVariables([]);
+            };
+
+            const bulkMapToStandard = (standardName) => {
+                setStandardizationMap(prev => ({
+                    ...prev,
+                    [standardName]: [...(prev[standardName] || []), ...selectedVariables]
+                }));
+                
+                clearSelection();
+            };
+
+            const bulkCreateNewStandard = () => {
+                if (!newMapping.standard || selectedVariables.length === 0) return;
+                
+                setStandardizationMap(prev => ({
+                    ...prev,
+                    [newMapping.standard]: selectedVariables
+                }));
+                
+                setNewMapping({ standard: '', variants: '' });
+                clearSelection();
+            };
+
+            const removeMapping = (value, standardName) => {
+                setStandardizationMap(prev => ({
+                    ...prev,
+                    [standardName]: prev[standardName]?.filter(v => v !== value) || []
+                }));
+            };
+
+            const copyRCode = () => {
+                const fileName = file?.name || 'your_file.xlsx';
+                const columnName = headers[selectedColumn] || 'your_column';
+                const cleanColumnName = columnName.replace(/[^a-zA-Z0-9_]/g, '_');
+                
+                let code = `# Variable Standardization Script for R
+# Generated for: ${fileName}
+# Column: ${columnName}
+
+library(readxl)
+library(dplyr)
+
+# Read the Excel file
+# Update the path if your file is in a different location
+df <- read_excel("${fileName}")
+
+# Create a simple mapping function
+standardize_values <- function(x) {
+  case_when(
+`;
+                
+                Object.entries(standardizationMap).forEach(([standard, variants]) => {
+                    variants.forEach(variant => {
+                        const escapedVariant = variant.replace(/"/g, '\\"');
+                        code += `    x == "${escapedVariant}" ~ "${standard}",\n`;
+                    });
+                });
+                
+                code += `    TRUE ~ x  # Keep original value if no match
+  )
+}
+
+# Apply the standardization
+df <- df %>%
+  mutate(standardized_${cleanColumnName} = standardize_values(\`${columnName}\`))
+
+# Save as CSV
+write.csv(df, "${fileName.replace(/\.(xlsx|xls)$/, '_standardized.csv')}", row.names = FALSE)
+
+# Show summary
+cat("Standardization complete!\\n")
+cat("Original unique values:", length(unique(df$\`${columnName}\`)), "\\n")
+cat("Standardized unique values:", length(unique(df$standardized_${cleanColumnName})), "\\n")
+cat("\\nFile saved as: ${fileName.replace(/\.(xlsx|xls)$/, '_standardized.csv')}")
+
+# Preview the mappings
+df %>%
+  select(\`${columnName}\`, standardized_${cleanColumnName}) %>%
+  filter(\`${columnName}\` != standardized_${cleanColumnName}) %>%
+  distinct() %>%
+  head(10)`;
+                
+                navigator.clipboard.writeText(code).then(() => {
+                    setCopiedCode({ r: true, python: false });
+                    setTimeout(() => setCopiedCode({ r: false, python: false }), 3000);
+                });
+            };
+
+            const copyPythonCode = () => {
+                const fileName = file?.name || 'your_file.xlsx';
+                const columnName = headers[selectedColumn] || 'your_column';
+                const cleanColumnName = columnName.replace(/[^a-zA-Z0-9_]/g, '_');
+                
+                let code = `# Variable Standardization Script for Python
+# Generated mappings for: ${fileName}
+# Column to standardize: ${columnName}
+# Output: Excel file with new standardized column
+# Designed for Google Colab or Jupyter Notebook
+
+import pandas as pd
+import os
+
+# ==== IMPORTANT: FILE UPLOAD INSTRUCTIONS ====
+# 
+# For Google Colab:
+# 1. Run this cell first to upload your file:
+#    from google.colab import files
+#    uploaded = files.upload()
+# 2. The file will appear in the file browser on the left
+# 3. Update the filename below if needed
+#
+# For Jupyter/Local Python:
+# 1. Place your Excel file in the same directory as this notebook
+# 2. Or update the file path below to match your file location
+
+# Update this filename to match your uploaded file
+filename = '${fileName}'
+
+# Check if file exists
+if not os.path.exists(filename):
+    print(f"❌ File not found: {filename}")
+    print("\\nPlease ensure you have:")
+    print("1. Uploaded the file (in Colab: use files.upload())")
+    print("2. Specified the correct filename")
+    print("\\nFiles in current directory:", os.listdir('.'))
+else:
+    print(f"✅ File found: {filename}")
+
+# ==== VARIABLE STANDARDIZATION MAPPINGS ====
+# These are the mappings you created interactively
+
+variable_standardization_map = {
+`;
+                
+                Object.entries(standardizationMap).forEach(([standard, variants]) => {
+                    code += `    "${standard}": [${variants.map(v => `"${v}"`).join(', ')}],\n`;
+                });
+                
+                code += `}
+
+# ==== STANDARDIZATION FUNCTION ====
+def standardize_variable(value, mapping_dict):
+    """Apply standardization mapping to a variable name"""
+    if pd.isna(value) or str(value).strip() == '':
+        return value
+    
+    value_str = str(value).strip()
+    
+    # Check each standard and its variants
+    for standard, variants in mapping_dict.items():
+        for variant in variants:
+            # Case-insensitive partial matching
+            if variant.lower() in value_str.lower() or value_str.lower() in variant.lower():
+                return standard
+    
+    # Return original value if no match found
+    return value_str
+
+# ==== LOAD AND PROCESS DATA ====
+print("\\nLoading Excel file...")
+try:
+    df = pd.read_excel(filename)
+    print(f"Data loaded successfully: {len(df)} rows, {len(df.columns)} columns")
+except Exception as e:
+    print(f"Error loading file: {e}")
+    print("\\nMake sure the file is a valid Excel file (.xlsx or .xls)")
+    raise
+
+# Check if the column exists
+if '${columnName}' not in df.columns:
+    print(f"\\n❌ Column '${columnName}' not found!")
+    print(f"Available columns: {', '.join(df.columns)}")
+    raise ValueError(f"Column '${columnName}' not found in the Excel file")
+
+# Apply standardization
+print(f"\\nApplying standardization to column: '${columnName}'")
+df['standardized_${cleanColumnName}'] = df['${columnName}'].apply(
+    lambda x: standardize_variable(x, variable_standardization_map)
+)
+
+# Calculate statistics
+original_unique = df['${columnName}'].nunique()
+standardized_unique = df['standardized_${cleanColumnName}'].nunique()
+reduction_pct = round((1 - standardized_unique/original_unique) * 100, 1)
+
+print(f"\\nStandardization complete!")
+print(f"  Original unique values: {original_unique}")
+print(f"  Standardized unique values: {standardized_unique}")
+print(f"  Reduction: {original_unique - standardized_unique} values ({reduction_pct}%)")
+
+# ==== SAVE RESULTS ====
+# Create output filename
+if filename.endswith('.xlsx'):
+    output_filename = filename[:-5] + '_standardized.xlsx'
+elif filename.endswith('.xls'):
+    output_filename = filename[:-4] + '_standardized.xlsx'
+else:
+    output_filename = filename + '_standardized.xlsx'
+
+# Save to Excel
+with pd.ExcelWriter(output_filename, engine='openpyxl') as writer:
+    df.to_excel(writer, index=False)
+
+print(f"\\n✅ File saved as: {output_filename}")
+print(f"📊 New column added: standardized_${cleanColumnName}")
+
+# For Google Colab - download the file
+try:
+    from google.colab import files
+    files.download(output_filename)
+    print(f"\\n📥 File downloaded to your computer!")
+except:
+    print(f"\\n📁 File saved in current directory")
+
+# ==== SHOW SAMPLE MAPPINGS ====
+print("\\n📋 Sample standardizations applied:")
+
+# Get examples where standardization occurred
+examples = df[df['${columnName}'] != df['standardized_${cleanColumnName}']]
+examples = examples[['${columnName}', 'standardized_${cleanColumnName}']].drop_duplicates().head(10)
+
+if len(examples) > 0:
+    for _, row in examples.iterrows():
+        print(f"  '{row['${columnName}']}' → '{row['standardized_${cleanColumnName}']}'")
+else:
+    print("  No standardizations were applied (all values matched exactly)")
+
+# ==== DATA PREVIEW ====
+print("\\n📊 Preview of results (first 5 rows):")
+print(df[['${columnName}', 'standardized_${cleanColumnName}']].head())
+
+# ==== NEXT STEPS ====
+print("\\n🎯 Next steps:")
+print("1. Download the standardized Excel file")
+print("2. Use the 'standardized_${cleanColumnName}' column for your analysis")
+print("3. Original values are preserved in the '${columnName}' column")
+print("4. You can now group by standardized values for meta-analysis")
+`;
+                
+                navigator.clipboard.writeText(code).then(() => {
+                    setCopiedCode({ r: false, python: true });
+                    setTimeout(() => setCopiedCode({ r: false, python: false }), 3000);
+                });
+            };
+
+            const values = getUniqueValues(selectedColumn);
+            
+            const filteredValues = values.filter(value => 
+                value.toLowerCase().includes(searchTerm.toLowerCase())
+            );
+
+            const mappedValues = filteredValues.filter(value => 
+                findStandardMapping(value) !== null
+            );
+            
+            const unmappedValues = filteredValues.filter(value => 
+                findStandardMapping(value) === null
+            );
+
+            const displayValues = [
+                ...(showMapped ? mappedValues : []),
+                ...(showUnmapped ? unmappedValues : [])
+            ];
+
+            if (!file) {
+                return (
+                    <div className="min-h-screen bg-gray-50">
+                        <div className="max-w-4xl mx-auto p-6">
+                            <div className="bg-white rounded-xl shadow-sm p-8">
+                                <h1 className="text-3xl font-bold text-gray-900 mb-2">
+                                    Variable Mapper
+                                </h1>
+                                <p className="text-gray-600 mb-8">
+                                    Upload any Excel file to standardize variables across your dataset
+                                </p>
+                                
+                                <div 
+                                    className={`border-2 border-dashed rounded-lg p-12 text-center transition-all ${
+                                        dragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400'
+                                    }`}
+                                    onDragEnter={handleDrag}
+                                    onDragLeave={handleDrag}
+                                    onDragOver={handleDrag}
+                                    onDrop={handleDrop}
+                                >
+                                    <Icon name="file-spreadsheet" className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+                                    <p className="text-lg mb-2">Drag and drop your Excel file here</p>
+                                    <p className="text-sm text-gray-500 mb-4">or</p>
+                                    <label className="cursor-pointer">
+                                        <span className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                                            Browse Files
+                                        </span>
+                                        <input
+                                            type="file"
+                                            accept=".xlsx,.xls"
+                                            onChange={handleFileInput}
+                                            className="hidden"
+                                        />
+                                    </label>
+                                    <p className="text-xs text-gray-500 mt-4">Supports .xlsx and .xls files</p>
+                                </div>
+
+                                <div className="mt-8 p-4 bg-blue-50 rounded-lg">
+                                    <h3 className="font-semibold text-blue-900 mb-2">How it works:</h3>
+                                    <ol className="text-sm text-blue-800 space-y-1">
+                                        <li>1. Upload your Excel file with variables to standardize</li>
+                                        <li>2. Select which column contains your variables</li>
+                                        <li>3. Create standardization mappings by clicking on values</li>
+                                        <li>4. Export code for R (CSV output) or Python (Excel output)</li>
+                                    </ol>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (loading) {
+                return (
+                    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                        <div className="text-center">
+                            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                            <h2 className="text-xl font-semibold text-gray-900">Loading Excel File</h2>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-gray-50">
+                    <div className="max-w-7xl mx-auto p-6">
+                        {/* Header */}
+                        <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <h1 className="text-3xl font-bold text-gray-900">
+                                        Variable Mapper
+                                    </h1>
+                                    <p className="text-gray-600">
+                                        Working with: {file.name}
+                                    </p>
+                                </div>
+                                <div className="flex gap-3">
+                                    <button
+                                        onClick={resetAll}
+                                        className="flex items-center px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
+                                    >
+                                        <Icon name="refresh-cw" className="mr-2 h-4 w-4" />
+                                        Start New
+                                    </button>
+                                    <button
+                                        onClick={() => setShowExportPreview(true)}
+                                        className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                                    >
+                                        <Icon name="eye" className="mr-2 h-4 w-4" />
+                                        Preview
+                                    </button>
+                                    <button
+                                        onClick={copyRCode}
+                                        className="flex items-center px-5 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                                    >
+                                        <Icon name="file-text" className="mr-2 h-4 w-4" />
+                                        {copiedCode.r ? 'Copied!' : 'Copy R Code'}
+                                    </button>
+                                    <button
+                                        onClick={copyPythonCode}
+                                        className="flex items-center px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                                    >
+                                        <Icon name="code" className="mr-2 h-4 w-4" />
+                                        {copiedCode.python ? 'Copied!' : 'Copy Python Code'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Column Selection */}
+                        <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
+                            <h3 className="font-semibold text-lg mb-4">Select Column to Standardize</h3>
+                            <div className="max-w-md">
+                                <label className="block text-sm font-medium mb-2">
+                                    Variable Column <span className="text-red-500">*</span>
+                                </label>
+                                <select
+                                    value={selectedColumn}
+                                    onChange={(e) => setSelectedColumn(e.target.value)}
+                                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                >
+                                    <option value="">Select a column...</option>
+                                    {headers.map((header, index) => (
+                                        <option key={index} value={index}>
+                                            {header || `Column ${index + 1}`}
+                                        </option>
+                                    ))}
+                                </select>
+                                {selectedColumn !== '' && (
+                                    <p className="text-sm text-gray-600 mt-2">
+                                        {values.length} unique values found in this column
+                                    </p>
+                                )}
+                            </div>
+                            
+                            <div className="mt-4 p-4 bg-amber-50 rounded-lg">
+                                <p className="text-sm text-amber-800">
+                                    <strong>Tip:</strong> Choose the column containing values you want to standardize (e.g., variable names, measurement types, categories)
+                                </p>
+                            </div>
+                        </div>
+
+                        {selectedColumn !== '' && (
+                            <>
+                                {/* Controls */}
+                                <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h3 className="font-semibold text-lg">Mapping Controls</h3>
+                                        <button
+                                            onClick={() => setBulkMappingMode(!bulkMappingMode)}
+                                            className={`flex items-center px-3 py-2 rounded-lg text-sm ${
+                                                bulkMappingMode ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-600'
+                                            }`}
+                                        >
+                                            <Icon name="check" className="h-4 w-4 mr-1" />
+                                            Bulk Select Mode ({selectedVariables.length} selected)
+                                        </button>
+                                    </div>
+
+                                    {/* Search and Filters */}
+                                    <div className="space-y-3">
+                                        <div className="relative">
+                                            <Icon name="search" className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                                            <input
+                                                type="text"
+                                                placeholder="Search values..."
+                                                value={searchTerm}
+                                                onChange={(e) => setSearchTerm(e.target.value)}
+                                                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
+                                        <div className="flex gap-3">
+                                            <button
+                                                onClick={() => setShowMapped(!showMapped)}
+                                                className={`flex items-center px-3 py-2 rounded-lg text-sm ${
+                                                    showMapped ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
+                                                }`}
+                                            >
+                                                <Icon name={showMapped ? "eye" : "eye-off"} className="h-4 w-4 mr-1" />
+                                                Show Mapped ({mappedValues.length})
+                                            </button>
+                                            <button
+                                                onClick={() => setShowUnmapped(!showUnmapped)}
+                                                className={`flex items-center px-3 py-2 rounded-lg text-sm ${
+                                                    showUnmapped ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-600'
+                                                }`}
+                                            >
+                                                <Icon name={showUnmapped ? "eye" : "eye-off"} className="h-4 w-4 mr-1" />
+                                                Show Unmapped ({unmappedValues.length})
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                    {/* Value List */}
+                                    <div className="bg-white rounded-xl shadow-sm p-6">
+                                        <h3 className="font-semibold text-lg mb-4">
+                                            Values ({displayValues.length} of {values.length})
+                                        </h3>
+                                        
+                                        <div className="max-h-96 overflow-y-auto space-y-2">
+                                            {displayValues.map((value, i) => {
+                                                const mapping = findStandardMapping(value);
+                                                const isMapped = mapping !== null;
+                                                
+                                                return (
+                                                    <div
+                                                        key={i}
+                                                        onClick={() => bulkMappingMode ? toggleVariableSelection(value) : setSelectedVariable(value)}
+                                                        className={`p-3 rounded-lg border-l-4 cursor-pointer transition-all hover:shadow-md ${
+                                                            bulkMappingMode && selectedVariables.includes(value)
+                                                                ? 'bg-purple-100 border-purple-500 shadow-md' 
+                                                                : selectedVariable === value 
+                                                                    ? 'bg-blue-50 border-blue-500 shadow-md' 
+                                                                    : isMapped 
+                                                                        ? 'bg-green-50 border-green-400 hover:bg-green-100' 
+                                                                        : 'bg-red-50 border-red-400 hover:bg-red-100'
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-start justify-between">
+                                                            <div className="flex-1">
+                                                                <div className="font-medium text-sm">{value}</div>
+                                                                {isMapped && (
+                                                                    <div className="text-xs text-green-600 mt-1 flex items-center">
+                                                                        <Icon name="arrow-right" className="h-3 w-3 mr-1" />
+                                                                        {mapping}
+                                                                    </div>
+                                                                )}
+                                                                {!isMapped && !bulkMappingMode && (
+                                                                    <div className="text-xs text-red-600 mt-1">
+                                                                        Click to map this value
+                                                                    </div>
+                                                                )}
+                                                                {!isMapped && bulkMappingMode && (
+                                                                    <div className="text-xs text-purple-600 mt-1">
+                                                                        Click to select for bulk mapping
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                            
+                                                            {bulkMappingMode && (
+                                                                <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
+                                                                    selectedVariables.includes(value) 
+                                                                        ? 'bg-purple-500 border-purple-500 text-white' 
+                                                                        : 'border-gray-300'
+                                                                }`}>
+                                                                    {selectedVariables.includes(value) && <Icon name="check" className="h-3 w-3" />}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+
+                                    {/* Mapping Interface */}
+                                    <div className="space-y-6">
+                                        {/* Bulk Mapping Interface */}
+                                        {bulkMappingMode && selectedVariables.length > 0 && (
+                                            <div className="bg-white rounded-xl shadow-sm p-6">
+                                                <h3 className="font-semibold text-lg mb-4">Bulk Map Selected Values</h3>
+                                                
+                                                <div className="bg-purple-50 p-4 rounded-lg mb-4">
+                                                    <div className="font-medium text-purple-900 mb-2">
+                                                        Selected Values ({selectedVariables.length}):
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto">
+                                                        {selectedVariables.map(value => (
+                                                            <span key={value} className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs">
+                                                                {value}
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        toggleVariableSelection(value);
+                                                                    }}
+                                                                    className="ml-1 text-purple-600 hover:text-purple-800"
+                                                                >
+                                                                    <Icon name="x" className="h-3 w-3 inline" />
+                                                                </button>
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                    <button
+                                                        onClick={clearSelection}
+                                                        className="mt-2 text-xs text-purple-600 hover:text-purple-800"
+                                                    >
+                                                        Clear all selections
+                                                    </button>
+                                                </div>
+
+                                                <div className="space-y-3">
+                                                    {Object.keys(standardizationMap).length > 0 && (
+                                                        <div>
+                                                            <label className="block text-sm font-medium mb-2">Map to existing standard:</label>
+                                                            <div className="space-y-2 max-h-32 overflow-y-auto">
+                                                                {Object.keys(standardizationMap).map(standard => (
+                                                                    <button
+                                                                        key={standard}
+                                                                        onClick={() => bulkMapToStandard(standard)}
+                                                                        className="w-full text-left p-2 bg-gray-50 hover:bg-gray-100 rounded border"
+                                                                    >
+                                                                        {standard}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    <div className={Object.keys(standardizationMap).length > 0 ? 'border-t pt-3' : ''}>
+                                                        <label className="block text-sm font-medium mb-2">
+                                                            {Object.keys(standardizationMap).length > 0 ? 'Or create new standard:' : 'Create new standard:'}
+                                                        </label>
+                                                        <input
+                                                            type="text"
+                                                            placeholder="New standard name"
+                                                            value={newMapping.standard}
+                                                            onChange={(e) => setNewMapping(prev => ({ ...prev, standard: e.target.value }))}
+                                                            className="w-full p-2 border border-gray-300 rounded mb-2"
+                                                        />
+                                                        <button
+                                                            onClick={bulkCreateNewStandard}
+                                                            className="w-full px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
+                                                        >
+                                                            Create Standard & Map All ({selectedVariables.length})
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Single Mapping Interface */}
+                                        {!bulkMappingMode && selectedVariable && (
+                                            <div className="bg-white rounded-xl shadow-sm p-6">
+                                                <h3 className="font-semibold text-lg mb-4">Map Value</h3>
+                                                
+                                                <div className="bg-blue-50 p-4 rounded-lg mb-4">
+                                                    <div className="font-medium text-blue-900">Selected Value:</div>
+                                                    <div className="text-blue-700">{selectedVariable}</div>
+                                                </div>
+
+                                                <div className="space-y-3">
+                                                    {Object.keys(standardizationMap).length > 0 && (
+                                                        <div>
+                                                            <label className="block text-sm font-medium mb-2">Map to existing standard:</label>
+                                                            <div className="space-y-2 max-h-32 overflow-y-auto">
+                                                                {Object.keys(standardizationMap).map(standard => (
+                                                                    <button
+                                                                        key={standard}
+                                                                        onClick={() => {
+                                                                            setStandardizationMap(prev => ({
+                                                                                ...prev,
+                                                                                [standard]: [...(prev[standard] || []), selectedVariable]
+                                                                            }));
+                                                                            setSelectedVariable(null);
+                                                                        }}
+                                                                        className="w-full text-left p-2 bg-gray-50 hover:bg-gray-100 rounded border"
+                                                                    >
+                                                                        {standard}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    <div className={Object.keys(standardizationMap).length > 0 ? 'border-t pt-3' : ''}>
+                                                        <label className="block text-sm font-medium mb-2">
+                                                            {Object.keys(standardizationMap).length > 0 ? 'Or create new standard:' : 'Create new standard:'}
+                                                        </label>
+                                                        <input
+                                                            type="text"
+                                                            placeholder="New standard name"
+                                                            value={newMapping.standard}
+                                                            onChange={(e) => setNewMapping(prev => ({ ...prev, standard: e.target.value }))}
+                                                            className="w-full p-2 border border-gray-300 rounded mb-2"
+                                                        />
+                                                        <button
+                                                            onClick={() => {
+                                                                if (newMapping.standard) {
+                                                                    setStandardizationMap(prev => ({
+                                                                        ...prev,
+                                                                        [newMapping.standard]: [selectedVariable]
+                                                                    }));
+                                                                    setNewMapping({ standard: '', variants: '' });
+                                                                    setSelectedVariable(null);
+                                                                }
+                                                            }}
+                                                            className="w-full px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                                                        >
+                                                            Create & Map
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Standardization Rules */}
+                                        <div className="bg-white rounded-xl shadow-sm p-6">
+                                            <h3 className="font-semibold text-lg mb-4">Standardization Rules</h3>
+                                            
+                                            {Object.keys(standardizationMap).length === 0 ? (
+                                                <p className="text-gray-500 text-sm">No mappings created yet. Click on values to start mapping.</p>
+                                            ) : (
+                                                <div className="space-y-2 max-h-64 overflow-y-auto">
+                                                    {Object.entries(standardizationMap).map(([standard, variants]) => (
+                                                        <div key={standard} className="border border-blue-200 rounded-lg p-3">
+                                                            <div className="font-medium text-gray-900 mb-2">{standard}</div>
+                                                            <div className="flex flex-wrap gap-1">
+                                                                {variants.map(variant => (
+                                                                    <span
+                                                                        key={variant}
+                                                                        className="inline-flex items-center px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded"
+                                                                    >
+                                                                        {variant}
+                                                                        <button
+                                                                            onClick={() => removeMapping(variant, standard)}
+                                                                            className="ml-1 text-blue-600 hover:text-blue-800"
+                                                                        >
+                                                                            <Icon name="x" className="h-3 w-3" />
+                                                                        </button>
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Summary */}
+                                <div className="mt-6 bg-gradient-to-r from-green-50 to-blue-50 rounded-xl p-6 border border-green-200">
+                                    <h3 className="font-semibold text-lg mb-3">Mapping Progress</h3>
+                                    <div className="grid grid-cols-3 gap-4 text-center">
+                                        <div>
+                                            <div className="text-2xl font-bold text-green-600">{mappedValues.length}</div>
+                                            <div className="text-sm text-gray-600">Mapped Values</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-2xl font-bold text-red-600">{unmappedValues.length}</div>
+                                            <div className="text-sm text-gray-600">Need Mapping</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-2xl font-bold text-blue-600">
+                                                {values.length > 0 ? Math.round((mappedValues.length / values.length) * 100) : 0}%
+                                            </div>
+                                            <div className="text-sm text-gray-600">Complete</div>
+                                        </div>
+                                    </div>
+                                    
+                                    {Object.keys(standardizationMap).length > 0 && (
+                                        <div className="mt-4 pt-4 border-t border-green-300">
+                                            <p className="text-sm text-gray-700">
+                                                <strong>{Object.keys(standardizationMap).length}</strong> standard categories created
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+                            </>
+                        )}
+
+                        {/* Export Preview Modal */}
+                        {showExportPreview && (
+                            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                                <div className="bg-white rounded-xl p-6 max-w-4xl w-full mx-4 max-h-96 overflow-y-auto">
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h3 className="text-lg font-semibold">Standardization Preview</h3>
+                                        <button
+                                            onClick={() => setShowExportPreview(false)}
+                                            className="text-gray-500 hover:text-gray-700"
+                                        >
+                                            <Icon name="x" className="h-6 w-6" />
+                                        </button>
+                                    </div>
+                                    
+                                    <div className="mb-4 p-4 bg-blue-50 rounded-lg">
+                                        <h4 className="font-medium mb-2">Export Options:</h4>
+                                        <div className="text-sm space-y-2">
+                                            <div className="flex items-start">
+                                                <Icon name="file-text" className="h-4 w-4 text-purple-600 mr-2 mt-0.5" />
+                                                <div>
+                                                    <strong className="text-purple-700">R Code:</strong> Creates a CSV file with a new standardized column. 
+                                                    Perfect for R users who prefer CSV format.
+                                                </div>
+                                            </div>
+                                            <div className="flex items-start">
+                                                <Icon name="code" className="h-4 w-4 text-blue-600 mr-2 mt-0.5" />
+                                                <div>
+                                                    <strong className="text-blue-700">Python Code:</strong> Creates an Excel file with a new standardized column. 
+                                                    Ideal for Google Colab or Jupyter notebooks.
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        <div>
+                                            <h4 className="font-medium mb-2">Variable Mappings ({Object.keys(standardizationMap).length} standards)</h4>
+                                            <div className="bg-gray-50 p-3 rounded text-sm max-h-48 overflow-y-auto">
+                                                {Object.keys(standardizationMap).length === 0 ? (
+                                                    <p className="text-gray-500">No mappings created yet</p>
+                                                ) : (
+                                                    Object.entries(standardizationMap).map(([standard, variants]) => (
+                                                        <div key={standard} className="mb-2">
+                                                            <span className="font-medium">{standard}:</span> {variants.join(', ')}
+                                                        </div>
+                                                    ))
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <h4 className="font-medium mb-2">Output Details:</h4>
+                                            <ul className="text-sm space-y-1">
+                                                <li>• Original column: <code className="bg-gray-200 px-1">{headers[selectedColumn] || 'Not selected'}</code></li>
+                                                <li>• New column name: <code className="bg-gray-200 px-1">standardized_{headers[selectedColumn]?.replace(/[^a-zA-Z0-9_]/g, '_') || 'column'}</code></li>
+                                                <li>• Values to process: {values.length}</li>
+                                                <li>• Mapped values: {mappedValues.length}</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // Render the app
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<FlexibleVariableMapper />);
+
+        // Initialize Lucide icons after render
+        lucide.createIcons();
+    </script>
+</body>
+</html>
+                                
