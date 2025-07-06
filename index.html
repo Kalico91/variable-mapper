@@ -90,8 +90,26 @@
             
             const getUniqueValues = () => {
                 if (!data || selectedColumn === '') return [];
-                const values = data.map(row => row[selectedColumn]).filter(v => v && v !== '');
-                return [...new Set(values)];
+                
+                try {
+                    // Convert selectedColumn to number since it comes as string from select
+                    const columnIndex = parseInt(selectedColumn);
+                    console.log('Getting values from column index:', columnIndex);
+                    
+                    const values = data
+                        .map(row => row[columnIndex])
+                        .filter(v => v !== null && v !== undefined && v !== '' && String(v).trim() !== '');
+                    
+                    // Convert all values to strings for consistency
+                    const stringValues = values.map(v => String(v));
+                    const uniqueValues = [...new Set(stringValues)];
+                    
+                    console.log('Found unique values:', uniqueValues.length);
+                    return uniqueValues;
+                } catch (error) {
+                    console.error('Error getting unique values:', error);
+                    return [];
+                }
             };
             
             const values = getUniqueValues();
@@ -265,19 +283,39 @@ df.to_excel("standardized_data.xlsx", index=False)`;
                         </div>
                         
                         {selectedColumn !== '' && (
-                            <div className="flex gap-4">
-                                <button
-                                    onClick={() => generateCode('R')}
-                                    className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700"
-                                >
-                                    Copy R Code
-                                </button>
-                                <button
-                                    onClick={() => generateCode('Python')}
-                                    className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-                                >
-                                    Copy Python Code
-                                </button>
+                            <div>
+                                <p className="text-sm text-gray-600 mb-4">
+                                    Found {values.length} unique values in column: {headers[selectedColumn]}
+                                </p>
+                                <div className="flex gap-4">
+                                    <button
+                                        onClick={() => generateCode('R')}
+                                        disabled={Object.keys(standardizationMap).length === 0}
+                                        className={`px-4 py-2 rounded ${
+                                            Object.keys(standardizationMap).length === 0
+                                                ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                                                : 'bg-purple-600 text-white hover:bg-purple-700'
+                                        }`}
+                                    >
+                                        Copy R Code
+                                    </button>
+                                    <button
+                                        onClick={() => generateCode('Python')}
+                                        disabled={Object.keys(standardizationMap).length === 0}
+                                        className={`px-4 py-2 rounded ${
+                                            Object.keys(standardizationMap).length === 0
+                                                ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                                                : 'bg-blue-600 text-white hover:bg-blue-700'
+                                        }`}
+                                    >
+                                        Copy Python Code
+                                    </button>
+                                </div>
+                                {Object.keys(standardizationMap).length === 0 && (
+                                    <p className="text-sm text-gray-500 mt-2">
+                                        Create mappings first before generating code
+                                    </p>
+                                )}
                             </div>
                         )}
                     </div>
@@ -300,52 +338,58 @@ df.to_excel("standardized_data.xlsx", index=False)`;
                                     onChange={(e) => setSearchTerm(e.target.value)}
                                     className="w-full p-2 border rounded mb-4"
                                 />
-                                <div className="max-h-96 overflow-y-auto">
-                                    {values
-                                        .filter(v => v.toLowerCase().includes(searchTerm.toLowerCase()))
-                                        .map((value, i) => {
-                                            const mapped = isMapped(value);
-                                            const standard = getMappedStandard(value);
-                                            const isSelected = selectedVariables.includes(value);
-                                            
-                                            return (
-                                                <div
-                                                    key={i}
-                                                    onClick={() => {
-                                                        if (mapped) return;
-                                                        toggleVariableSelection(value);
-                                                    }}
-                                                    className={`p-3 mb-2 rounded cursor-pointer ${
-                                                        mapped ? 'bg-green-100' : 
-                                                        isSelected ? 'bg-purple-100 border-2 border-purple-400' :
-                                                        'bg-gray-100 hover:bg-gray-200'
-                                                    }`}
-                                                >
-                                                    <div className="flex justify-between items-center">
-                                                        <div>
-                                                            <div>{value}</div>
-                                                            {mapped && (
-                                                                <div className="text-sm text-green-600">→ {standard}</div>
-                                                            )}
-                                                        </div>
-                                                        {!mapped && (
-                                                            <div className={`w-5 h-5 rounded border-2 ${
-                                                                isSelected 
-                                                                    ? 'bg-purple-500 border-purple-500' 
-                                                                    : 'border-gray-400'
-                                                            }`}>
-                                                                {isSelected && (
-                                                                    <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
-                                                                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                                                    </svg>
+                                {values.length === 0 ? (
+                                    <div className="text-gray-500 text-center py-8">
+                                        No values found in this column
+                                    </div>
+                                ) : (
+                                    <div className="max-h-96 overflow-y-auto">
+                                        {values
+                                            .filter(v => v.toLowerCase().includes(searchTerm.toLowerCase()))
+                                            .map((value, i) => {
+                                                const mapped = isMapped(value);
+                                                const standard = getMappedStandard(value);
+                                                const isSelected = selectedVariables.includes(value);
+                                                
+                                                return (
+                                                    <div
+                                                        key={i}
+                                                        onClick={() => {
+                                                            if (mapped) return;
+                                                            toggleVariableSelection(value);
+                                                        }}
+                                                        className={`p-3 mb-2 rounded cursor-pointer ${
+                                                            mapped ? 'bg-green-100' : 
+                                                            isSelected ? 'bg-purple-100 border-2 border-purple-400' :
+                                                            'bg-gray-100 hover:bg-gray-200'
+                                                        }`}
+                                                    >
+                                                        <div className="flex justify-between items-center">
+                                                            <div>
+                                                                <div>{value}</div>
+                                                                {mapped && (
+                                                                    <div className="text-sm text-green-600">→ {standard}</div>
                                                                 )}
                                                             </div>
-                                                        )}
+                                                            {!mapped && (
+                                                                <div className={`w-5 h-5 rounded border-2 ${
+                                                                    isSelected 
+                                                                        ? 'bg-purple-500 border-purple-500' 
+                                                                        : 'border-gray-400'
+                                                                }`}>
+                                                                    {isSelected && (
+                                                                        <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                                                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                                        </svg>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            );
-                                        })}
-                                </div>
+                                                );
+                                            })}
+                                    </div>
+                                )}
                             </div>
                             
                             <div className="bg-white rounded-lg shadow-lg p-6">
