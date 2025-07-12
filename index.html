@@ -478,6 +478,11 @@ df.to_excel("standardized_data.xlsx", index=False)`;
                                         </div>
                                     </div>
                                 )}
+                                {selectedVariables.length === 0 && (
+                                    <div className="text-gray-500 text-center py-8">
+                                        Select values from the left to create mappings
+                                    </div>
+                                )}
                                 
                                 <div className="space-y-3">
                                     {Object.entries(standardizationMap).map(([standard, variants]) => (
