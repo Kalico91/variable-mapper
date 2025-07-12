@@ -127,6 +127,16 @@
                 return null;
             };
             
+            const toggleVariableSelection = (value) => {
+                setSelectedVariables(prev => {
+                    if (prev.includes(value)) {
+                        return prev.filter(v => v !== value);
+                    } else {
+                        return [...prev, value];
+                    }
+                });
+            };
+            
             const mapToStandard = (standard) => {
                 if (selectedVariables.length === 0) return;
                 
@@ -136,16 +146,6 @@
                 }));
                 setSelectedVariables([]);
                 setNewStandard('');
-            };
-            
-            const toggleVariableSelection = (value) => {
-                setSelectedVariables(prev => {
-                    if (prev.includes(value)) {
-                        return prev.filter(v => v !== value);
-                    } else {
-                        return [...prev, value];
-                    }
-                });
             };
             
             const removeMapping = (value, standard) => {
@@ -444,41 +444,8 @@ df.to_excel("standardized_data.xlsx", index=False)`;
                                         </div>
                                     </div>
                                 )}
-                                    <div className="mb-4 p-4 bg-blue-50 rounded">
-                                        <p className="font-medium mb-2">Map "{selectedVariable}" to:</p>
-                                        <div className="space-y-2">
-                                            {Object.keys(standardizationMap).map(standard => (
-                                                <button
-                                                    key={standard}
-                                                    onClick={() => mapToStandard(selectedVariable, standard)}
-                                                    className="block w-full text-left p-2 bg-white rounded hover:bg-gray-100"
-                                                >
-                                                    {standard}
-                                                </button>
-                                            ))}
-                                            <div className="flex gap-2">
-                                                <input
-                                                    type="text"
-                                                    placeholder="New standard name"
-                                                    value={newStandard}
-                                                    onChange={(e) => setNewStandard(e.target.value)}
-                                                    className="flex-1 p-2 border rounded"
-                                                />
-                                                <button
-                                                    onClick={() => {
-                                                        if (newStandard) {
-                                                            mapToStandard(selectedVariable, newStandard);
-                                                        }
-                                                    }}
-                                                    className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
-                                                >
-                                                    Create
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-                                {selectedVariables.length === 0 && (
+                                
+                                {selectedVariables.length === 0 && Object.keys(standardizationMap).length === 0 && (
                                     <div className="text-gray-500 text-center py-8">
                                         Select values from the left to create mappings
                                     </div>
