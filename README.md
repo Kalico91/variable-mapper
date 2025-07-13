@@ -13,7 +13,7 @@ A web-based tool for standardizing variables in Excel files, perfect for systema
 - Create standardization mappings interactively
 - Export code for R (CSV output) or Python (Excel output)
 - Works entirely in your browser - no data uploaded to servers
-- Single and bulk mapping modes
+
 
 ## 🎯 Use Cases
 
