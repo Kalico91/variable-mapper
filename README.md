@@ -8,10 +8,10 @@ A web-based tool for standardizing variables in Excel files, perfect for systema
 
 ## 📋 Features
 
-- Upload any Excel file (.xlsx or .xls)
+- Upload a single sheet Excel file (.xlsx or .xls)
 - Select which column contains variables to standardize
 - Create standardization mappings interactively
-- Export code for R (CSV output) or Python (Excel output)
+- Export code to create a new column within your dataset for R (CSV output) or Python (Excel output)
 - Works entirely in your browser - no data uploaded to servers
 
 
